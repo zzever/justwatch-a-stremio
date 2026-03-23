@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JustWatch a Stremio
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      2.0
 // @description  Boton para buscar en stremio desde justwatch
 // @match        https://www.justwatch.com/*
 // @grant        none
@@ -9,11 +9,10 @@
 (function () {
     'use strict';
 
-    /* ---------- Utilidades ---------- */
+    /* ---------- CSS ---------- */
 
     function injectCSS() {
         if (document.getElementById('jw-stremio-style')) return;
-
         const style = document.createElement('style');
         style.id = 'jw-stremio-style';
         style.textContent = `
@@ -33,7 +32,7 @@
                 align-items: center;
                 gap: 20px;
                 font-weight: 600;
-                color: #ffffff;
+                color: #fff;
                 text-decoration: none;
                 font-size: 16px;
                 box-shadow:
@@ -44,7 +43,6 @@
                 min-width: 300px;
                 overflow: hidden;
             }
-
             .jw-stremio-glass:hover {
                 background: rgba(16, 185, 129, 0.3);
                 border-color: rgba(255, 255, 255, 0.6);
@@ -54,7 +52,6 @@
                     0 0 0 1px rgba(255,255,255,0.4),
                     inset 0 1px 0 rgba(255,255,255,0.55);
             }
-
             .jw-stremio-glass img.logo-stremio {
                 border-radius: 12px;
                 box-shadow: 0 8px 25px rgba(0,0,0,0.4);
@@ -65,12 +62,10 @@
                 width: 36px;
                 height: 36px;
             }
-
             .jw-stremio-glass:hover img.logo-stremio {
                 transform: scale(1.35) rotate(10deg);
                 filter: brightness(1.35) drop-shadow(0 10px 30px rgba(16,185,129,0.8));
             }
-
             .jw-stremio-glass .glass-text strong {
                 background: linear-gradient(135deg, rgba(255,255,255,1), rgba(255,255,255,0.85));
                 -webkit-background-clip: text;
@@ -80,7 +75,6 @@
                 letter-spacing: 1px;
                 display: block;
             }
-
             .jw-stremio-glass .glass-text .preview {
                 font-size: 14px;
                 opacity: 0.88;
@@ -93,17 +87,51 @@
         document.head.appendChild(style);
     }
 
+    /* ---------- Helpers de título ---------- */
+
+    // Lee "Título original: XXX" / "Original title: XXX" si existe
+    function getOriginalTitle() {
+        const selectors = ['h2','h3','p','div','span'];
+        for (const sel of selectors) {
+            const nodes = document.querySelectorAll(sel);
+            for (const el of nodes) {
+                const text = el.textContent.trim();
+                let m = text.match(/^Título original:\s*(.+)$/i) ||
+                        text.match(/^Original title:\s*(.+)$/i);
+                if (m && m[1]) return m[1].trim();
+            }
+        }
+        return null;
+    }
+
+    // Del pathname saca el slug después de /pelicula/ o /serie/
+    function getTitleFromSlug(pathname) {
+        // /es/serie/soda-master/temporada-1 → ["es","serie","soda-master","temporada-1"]
+        const parts = pathname.split('/').filter(Boolean);
+        const idxSerie = parts.indexOf('serie');
+        const idxPeli = parts.indexOf('pelicula');
+        let slug = null;
+
+        if (idxSerie !== -1 && parts[idxSerie + 1]) slug = parts[idxSerie + 1];
+        if (idxPeli !== -1 && parts[idxPeli + 1]) slug = parts[idxPeli + 1];
+
+        if (!slug) return null;
+        return decodeURIComponent(slug).replace(/-/g, ' ').trim();
+    }
+
+    // Normaliza y quita año, temporada y guiones colgando
     function limpiarTituloBase(texto) {
         return texto
             .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')           // tildes
-            .replace(/Temporada\s+\d+.*$/i, '')       // "Temporada X ..."
+            .replace(/[\u0300-\u036f]/g, '')// tildes
+            .replace(/Temporada\s+\d+.*$/i, '')// "Temporada 1 ..."
             .trim()
-            .replace(/[^\w\s\-:]/g, ' ')              // símbolos raros
-            .replace(/\s+/g, ' ')                     // espacios múltiples
-            .replace(/\s*\(\d{4}\)(\s|$)/g, '$1')     // "(2023)"
-            .replace(/[-–]\s*\d{4}(\s|$)/g, '$1')     // "- 2023"
-            .replace(/\d{4}\s*$/g, '')                // "2023" final
+            .replace(/[^\w\s\-:]/g, ' ') // símbolos raros
+            .replace(/\s+/g, ' ')// espacios múltiples
+            .replace(/\s*[-–]\s*\d{4}(\s|$)/g, '$1')// " - 2009"
+            .replace(/\s*\(\d{4}\)(\s|$)/g, '$1') // "(2009)"
+            .replace(/\d{4}\s*$/g, '')// "2009"
+            .replace(/\s*[-–]\s*$/g, '')// guion final " -"
             .trim();
     }
 
@@ -111,16 +139,23 @@
         return limpiarTituloBase(texto).slice(0, 45);
     }
 
-    function tituloBuscar(pathname, tituloCompleto) {
-        // Si algún día quieres tratar distinto pelis/series, lo haces aquí.
-        return limpiarTituloBase(tituloCompleto);
+    // Orden de prioridad para la QUERY:
+    // 1) slug del URL (soda-master → "soda master")
+    // 2) título original si existe
+    // 3) H1 limpio
+    function getTituloBuscar(pathname, tituloH1) {
+        const fromSlug = getTitleFromSlug(pathname);
+        if (fromSlug) return fromSlug;
+
+        const orig = getOriginalTitle();
+        const base = orig || tituloH1;
+        return limpiarTituloBase(base);
     }
 
     function esTituloValido() {
         const pathname = location.pathname;
         const h1 = document.querySelector('h1');
         const titulo = h1?.textContent?.trim() || '';
-
         return !(
             pathname === '/' ||
             pathname === '/es' ||
@@ -137,10 +172,10 @@
         const h1 = document.querySelector('h1');
         if (!h1) return;
 
-        const tituloFull = h1.textContent.trim();
-        const buscar = tituloBuscar(location.pathname, tituloFull);
-        const preview = limpiarTituloPreview(tituloFull);
-        const urlStremio = `https://web.stremio.com/#/search?query=${encodeURIComponent(buscar)}`;
+        const tituloFull   = h1.textContent.trim();
+        const tituloBuscar = getTituloBuscar(location.pathname, tituloFull);
+        const preview      = limpiarTituloPreview(tituloFull);
+        const urlStremio   = `https://web.stremio.com/#/search?query=${encodeURIComponent(tituloBuscar)}`;
 
         const boton = document.createElement('a');
         boton.id = 'glass-sin-ano';
@@ -148,7 +183,7 @@
         boton.href = urlStremio;
         boton.target = '_blank';
         boton.rel = 'noopener noreferrer';
-        boton.setAttribute('aria-label', `Abrir "${buscar}" en Stremio Web`);
+        boton.setAttribute('aria-label', `Abrir "${tituloBuscar}" en Stremio Web`);
 
         boton.innerHTML = `
             <img class="logo-stremio"
@@ -170,7 +205,7 @@
 
         parent.appendChild(boton);
 
-        console.log('🎬 JustWatch → Stremio Web:', urlStremio);
+        console.log('🎬 JustWatch → Stremio Web (slug):', tituloBuscar, urlStremio);
     }
 
     function init() {
@@ -180,18 +215,17 @@
             if (document.querySelector('h1')) crearBoton();
         };
 
-        // Primeros intentos al cargar
+        // primeros intentos
         tryCreate();
         setTimeout(tryCreate, 500);
         setTimeout(tryCreate, 1500);
 
-        // Observer para SPA
+        // SPA observer
         const observer = new MutationObserver(() => {
             if (!document.getElementById('glass-sin-ano')) {
                 crearBoton();
             }
         });
-
         observer.observe(document.body, { childList: true, subtree: true });
     }
 
@@ -201,3 +235,4 @@
         init();
     }
 })();
+
