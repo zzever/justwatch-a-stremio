@@ -1,11 +1,12 @@
 // ==UserScript==
-// @name         JustWatch a Stremio
+// @name         JustWatch → Stremio Web Glass (slug + sin año)
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  Boton para buscar en stremio desde justwatch
+// @version      3.1
+// @description  Botón glass para abrir búsqueda en Stremio Web usando el slug del URL, sin años
 // @match        https://www.justwatch.com/*
 // @grant        none
 // ==/UserScript==
+
 (function () {
     'use strict';
 
@@ -104,7 +105,7 @@
         return null;
     }
 
-    // Del pathname saca el slug después de /pelicula/ o /serie/
+    // Del pathname saca el slug después de /pelicula/ o /serie/ y lo limpia
     function getTitleFromSlug(pathname) {
         // /es/serie/soda-master/temporada-1 → ["es","serie","soda-master","temporada-1"]
         const parts = pathname.split('/').filter(Boolean);
@@ -116,7 +117,9 @@
         if (idxPeli !== -1 && parts[idxPeli + 1]) slug = parts[idxPeli + 1];
 
         if (!slug) return null;
-        return decodeURIComponent(slug).replace(/-/g, ' ').trim();
+
+        const decoded = decodeURIComponent(slug).replace(/-/g, ' ').trim();
+        return limpiarTituloBase(decoded); // aquí se quita año y guiones también
     }
 
     // Normaliza y quita año, temporada y guiones colgando
@@ -124,14 +127,14 @@
         return texto
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '')// tildes
-            .replace(/Temporada\s+\d+.*$/i, '')// "Temporada 1 ..."
+            .replace(/Temporada\s+\d+.*$/i, '') // "Temporada 1 ..."
             .trim()
-            .replace(/[^\w\s\-:]/g, ' ') // símbolos raros
+            .replace(/[^\w\s\-:]/g, ' ')// símbolos raros
             .replace(/\s+/g, ' ')// espacios múltiples
             .replace(/\s*[-–]\s*\d{4}(\s|$)/g, '$1')// " - 2009"
-            .replace(/\s*\(\d{4}\)(\s|$)/g, '$1') // "(2009)"
+            .replace(/\s*\(\d{4}\)(\s|$)/g, '$1')// "(2009)"
             .replace(/\d{4}\s*$/g, '')// "2009"
-            .replace(/\s*[-–]\s*$/g, '')// guion final " -"
+            .replace(/\s*[-–]\s*$/g, '') // guion final " -"
             .trim();
     }
 
@@ -140,7 +143,7 @@
     }
 
     // Orden de prioridad para la QUERY:
-    // 1) slug del URL (soda-master → "soda master")
+    // 1) slug del URL (soda-master → "soda master", sin año)
     // 2) título original si existe
     // 3) H1 limpio
     function getTituloBuscar(pathname, tituloH1) {
@@ -172,10 +175,10 @@
         const h1 = document.querySelector('h1');
         if (!h1) return;
 
-        const tituloFull   = h1.textContent.trim();
+        const tituloFull = h1.textContent.trim();
         const tituloBuscar = getTituloBuscar(location.pathname, tituloFull);
-        const preview      = limpiarTituloPreview(tituloFull);
-        const urlStremio   = `https://web.stremio.com/#/search?query=${encodeURIComponent(tituloBuscar)}`;
+        const preview = limpiarTituloPreview(tituloFull);
+        const urlStremio = `https://web.stremio.com/#/search?query=${encodeURIComponent(tituloBuscar)}`;
 
         const boton = document.createElement('a');
         boton.id = 'glass-sin-ano';
@@ -205,7 +208,7 @@
 
         parent.appendChild(boton);
 
-        console.log('🎬 JustWatch → Stremio Web (slug):', tituloBuscar, urlStremio);
+        console.log('🎬 JustWatch → Stremio Web (slug, sin año):', tituloBuscar, urlStremio);
     }
 
     function init() {
@@ -235,4 +238,5 @@
         init();
     }
 })();
+
 
